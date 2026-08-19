@@ -30,7 +30,8 @@ small JSON files. When nothing happens, tmux-agent-hub costs nothing.
 
 - tmux ≥ 3.1 for the status bar and the sidebar; ≥ 3.2 for everything
   that opens in a popup (advisor, fzf search, skills inspector)
-- Go ≥ 1.24 (to build; the result is a single static binary)
+- `curl` or `wget` — to fetch the release binary on first run
+- Go ≥ 1.24 only if you build it yourself (hacking on the plugin)
 - [fzf](https://github.com/junegunn/fzf) — optional, for `prefix+f` search
 - Claude Code and/or Codex CLI
 
@@ -53,18 +54,15 @@ git clone https://github.com/mrybas/tmux-agent-hub ~/.tmux/plugins/tmux-agent-hu
 run-shell ~/.tmux/plugins/tmux-agent-hub/plugin.tmux
 ```
 
-Either way the plugin builds its binary on first run (Go required) and
-wires the status bar and key bindings. No Go on that machine? Take the
-tarball for your platform from
-[Releases](https://github.com/mrybas/tmux-agent-hub/releases) and put the
-binary at `bin/tmux-agent-hub` inside the plugin directory — the plugin
-uses it as is. (The macOS builds are unsigned: if you downloaded the
-tarball with a browser, clear the quarantine flag once —
-`xattr -d com.apple.quarantine bin/tmux-agent-hub`.) Then register the agent hooks
-once — this is the part that makes agents report to the plugin:
+Either way the plugin gets its binary on first run — it downloads the
+release for your platform (verified against the release's `SHA256SUMS`)
+and needs no toolchain. Only a checkout whose sources are newer than its
+binary is built locally, which is what a development tree looks like; if
+you want that, install Go. Then register the agent hooks once — this is
+the part that makes agents report to the plugin:
 
 ```bash
-cd ~/.tmux/plugins/tmux-agent-hub && make install-hooks
+~/.tmux/plugins/tmux-agent-hub/bin/tmux-agent-hub install-hooks
 ```
 
 It registers hooks in:

@@ -13,7 +13,11 @@ make vet     # go vet ./...
 ```
 
 Go ≥ 1.24. No other tooling is required; `fzf` is only needed to use the
-search popup.
+search popup. A development checkout builds itself: `plugin.tmux`
+downloads a release binary only when Go is missing, and a tree whose
+sources are newer than `bin/tmux-agent-hub` is always built, never
+downloaded — otherwise your changes would be silently replaced by the
+last release.
 
 To try a change against your own tmux, rebuild and re-source the plugin:
 

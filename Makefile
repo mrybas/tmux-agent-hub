@@ -13,10 +13,14 @@ test:
 vet:
 	go vet ./...
 
-install-hooks: build
+# Registering hooks must not need a toolchain: the plugin downloads a
+# release binary when Go is absent, and that binary can do this itself.
+install-hooks:
+	@[ -x bin/tmux-agent-hub ] || $(MAKE) build
 	./bin/tmux-agent-hub install-hooks
 
-uninstall-hooks: build
+uninstall-hooks:
+	@[ -x bin/tmux-agent-hub ] || $(MAKE) build
 	./bin/tmux-agent-hub uninstall-hooks
 
 clean:
