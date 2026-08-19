@@ -311,11 +311,16 @@ func apply(store *state.Store, paneID string, pl *payload, now time.Time) error 
 		if err := store.Delete(paneID); err != nil {
 			return err
 		}
+		// the process may outlive the session — an agent asked to exit sits
+		// at its confirmation prompt — so remember that this pane's session
+		// is over and nothing should adopt what is still running there
+		store.MarkEnded(paneID)
 		tmuxctl.RefreshStatus()
 		return nil
 	}
 
-	cfg, _ := config.Load() // broken config → defaults, never break a hook
+	cfg, _ := config.Load()  // broken config → defaults, never break a hook
+	store.ClearEnded(paneID) // an event other than SessionEnd: a session lives here
 	if _, known := store.Load(paneID); known != nil && !paneRunsAgent(paneID, pl.agent) {
 		// A pane we do not track, with no agent in it: a late event from a
 		// session whose pane is gone, resolved onto some shell that happens

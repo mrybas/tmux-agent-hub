@@ -353,38 +353,78 @@ func adoptUntracked(store *state.Store, panes []*state.Pane) bool {
 		u.Title = "" // a tracked entry now — no "untracked" label
 		u.StatusSince = time.Now()
 		u.UpdatedAt = time.Now()
-		if sid, tr := paneSessionHints(pidByPane[u.PaneID]); sid != "" || tr != "" {
-			u.SessionID = sid
-			u.TranscriptPath = tr
-			if tr == "" && sid != "" {
-				u.TranscriptPath = findTranscript(home, u.Cwd, sid)
-			}
-		}
-		if u.TranscriptPath == "" && u.Agent == "claude" && home != "" && cwdCount[u.Cwd] == 1 {
-			// single agent in this cwd: the newest project transcript is its
-			glob := filepath.Join(home, ".claude", "projects", claudeProjectDir(u.Cwd), "*.jsonl")
-			if matches, err := filepath.Glob(glob); err == nil && len(matches) > 0 {
-				newest, newestAt := "", time.Time{}
-				for _, m := range matches {
-					if st, err := os.Stat(m); err == nil && st.ModTime().After(newestAt) {
-						newest, newestAt = m, st.ModTime()
-					}
-				}
-				// only if it is plausibly this session: a transcript nobody
-				// has written to for a long time belongs to an agent that
-				// finished, and attaching it shows a fresh pane wearing the
-				// last words of a session that is over
-				if newest != "" && time.Since(newestAt) < cfg.Advisor.StaleWorkingAfter() {
-					u.TranscriptPath = newest
-					u.SessionID = strings.TrimSuffix(filepath.Base(newest), ".jsonl")
-				}
-			}
+		if !attachSession(u, store, home, cwdCount[u.Cwd] == 1, cfg.Advisor.StaleWorkingAfter()) {
+			continue
 		}
 		if store.Save(u) == nil {
 			adopted = true
 		}
 	}
 	return adopted
+}
+
+// attachSession decides whether an untracked agent pane may be adopted,
+// and fills in the session it belongs to. Both halves are one question: a
+// pane is only worth tracking when we can say which session is in it.
+func attachSession(u *state.Pane, store *state.Store, home string, alone bool, fresh time.Duration) bool {
+	if store.Ended(u.PaneID) {
+		// the session in this pane ended; whatever is still running there
+		// is an agent at its exit prompt, not an agent at work
+		return false
+	}
+	// the process command line pins the session deterministically — but
+	// only for a pid we actually have: asking about pid 0 walks whatever
+	// the process table starts with and hands back a stranger's session
+	pid := paneProcessID(u.PaneID)
+	if sid, tr := hintsFor(pid); sid != "" || tr != "" {
+		u.SessionID, u.TranscriptPath = sid, tr
+		if tr == "" && sid != "" {
+			u.TranscriptPath = findTranscript(home, u.Cwd, sid)
+		}
+	}
+	if u.TranscriptPath == "" && u.Agent == "claude" && home != "" && alone {
+		// the only agent in this directory: the newest transcript of the
+		// matching project is its — but only if someone is still writing to
+		// it. An older one belongs to a session that has finished, and
+		// attaching it dresses a pane in the last words of the dead.
+		glob := filepath.Join(home, ".claude", "projects", claudeProjectDir(u.Cwd), "*.jsonl")
+		if matches, err := filepath.Glob(glob); err == nil {
+			newest, newestAt := "", time.Time{}
+			for _, m := range matches {
+				if st, err := os.Stat(m); err == nil && st.ModTime().After(newestAt) {
+					newest, newestAt = m, st.ModTime()
+				}
+			}
+			if newest != "" && time.Since(newestAt) < fresh {
+				u.TranscriptPath = newest
+				u.SessionID = strings.TrimSuffix(filepath.Base(newest), ".jsonl")
+			}
+		}
+	}
+	// Codex has no per-directory transcripts: its rollouts live in one
+	// dated tree, so "the newest one" is as likely to belong to another
+	// pane as to this one. Guessing there put a stranger's session in the
+	// sidebar, so untracked Codex panes are only adopted when their own
+	// process says which session they are — with hooks installed they are
+	// tracked the moment they do anything anyway.
+	return u.TranscriptPath != ""
+}
+
+// hintsFor is paneSessionHints for a pid we are sure of.
+func hintsFor(pid int) (sessionID, transcriptPath string) {
+	if pid <= 0 {
+		return "", ""
+	}
+	return paneSessionHints(pid)
+}
+
+// paneProcessID is the pid of the process running in a pane ("" pane or a
+// tmux hiccup gives 0, which no process tree matches).
+func paneProcessID(paneID string) int {
+	if info, ok := tmuxctl.PaneInfoFor(paneID); ok {
+		return info.PID
+	}
+	return 0
 }
 
 // statuslineCmd prints the glyph segment. It also self-cleans: state for

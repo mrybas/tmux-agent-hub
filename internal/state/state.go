@@ -284,6 +284,34 @@ func (s *Store) Save(p *Pane) error {
 	return os.Rename(tmp.Name(), s.fileFor(p.PaneID))
 }
 
+// endedFor is the tombstone path for a pane: the marker that a session in
+// it ended, so nothing may adopt whatever is left running there.
+func (s *Store) endedFor(paneID string) string {
+	return filepath.Join(s.dir, "pane-"+strings.TrimPrefix(paneID, "%")+".ended")
+}
+
+// MarkEnded records that a session in this pane ended. An agent asked to
+// exit can sit at its confirmation prompt for as long as the user leaves
+// it there: the process is alive, the session is over, and only the hook
+// we just received knows the difference.
+func (s *Store) MarkEnded(paneID string) error {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(s.endedFor(paneID), []byte(time.Now().Format(time.RFC3339)+"\n"), 0o644)
+}
+
+// Ended reports whether the last session in this pane ended.
+func (s *Store) Ended(paneID string) bool {
+	_, err := os.Stat(s.endedFor(paneID))
+	return err == nil
+}
+
+// ClearEnded forgets the tombstone — a new session is running in the pane.
+func (s *Store) ClearEnded(paneID string) {
+	os.Remove(s.endedFor(paneID))
+}
+
 func (s *Store) Delete(paneID string) error {
 	err := os.Remove(s.fileFor(paneID))
 	if errors.Is(err, fs.ErrNotExist) {
