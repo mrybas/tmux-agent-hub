@@ -1,0 +1,11 @@
+# Gruvbox Dark — https://github.com/morhetz/gruvbox
+[colors]
+working = "#fabd2f"            # yellow
+waiting_permission = "#fb4934" # red
+waiting_input = "#8ec07c"      # aqua
+done = "#b8bb26"               # green
+dead = "#928374"               # gray
+
+[theme]
+accent = "#83a598" # blue
+dim = "#928374"    # gray

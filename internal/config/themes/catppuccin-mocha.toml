@@ -1,0 +1,11 @@
+# Catppuccin Mocha — https://catppuccin.com/palette (mocha)
+[colors]
+working = "#f9e2af"            # yellow
+waiting_permission = "#f38ba8" # red
+waiting_input = "#94e2d5"      # teal
+done = "#a6e3a1"               # green
+dead = "#6c7086"               # overlay0
+
+[theme]
+accent = "#b4befe" # lavender
+dim = "#6c7086"    # overlay0

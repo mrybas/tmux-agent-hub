@@ -1,0 +1,71 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'tag to build (must already exist)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      # never interpolate a ref into a shell script: a tag may legally be
+      # named "v$(command)". Through the environment it stays data.
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - name: check the tag name
+        run: |
+          set -eu
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "refusing to release tag '$TAG': expected v<version>"; exit 1 ;;
+          esac
+          printf '%s' "$TAG" | grep -Eq '^v[0-9A-Za-z.+-]+$' \
+            || { echo "tag '$TAG' has characters we will not put in a filename"; exit 1; }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          check-latest: true
+
+      # never publish a tag that does not pass its own suite
+      - run: go test ./...
+
+      # everything in the dependency tree is pure Go, so one runner can
+      # cross-compile every target
+      - name: build
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -eu
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+            os="${target%/*}"; arch="${target#*/}"
+            name="tmux-agent-hub_${TAG}_${os}_${arch}"
+            GOOS="$os" GOARCH="$arch" go build \
+              -ldflags "-s -w -X main.version=${TAG}" \
+              -o "dist/${name}/tmux-agent-hub" ./cmd/tmux-agent-hub
+            cp README.md LICENSE "dist/${name}/"
+            tar -C dist -czf "dist/${name}.tar.gz" "$name"
+            rm -rf "dist/${name}"
+          done
+          cd dist && sha256sum *.tar.gz > SHA256SUMS
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh release create "$TAG" dist/*.tar.gz dist/SHA256SUMS \
+            --title "$TAG" --generate-notes --verify-tag
