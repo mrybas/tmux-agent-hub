@@ -511,6 +511,81 @@ func isUserPrompt(prompt string) bool {
 		!strings.HasPrefix(prompt, ReqMarker) && !strings.HasPrefix(prompt, AdvMarker)
 }
 
+// ReconcileDeparted drops agents whose pane outlived them. A pane that is
+// a shell again means the agent exited without a SessionEnd hook — killed,
+// crashed, or a CLI that never fires one — and the entry would otherwise
+// sit in the sidebar for ever, claiming an agent that is not there.
+// Called from the renderers, like ReconcileInterrupted.
+func ReconcileDeparted(store *state.Store, panes []*state.Pane) bool {
+	infos, err := tmuxctl.PanesFull()
+	if err != nil {
+		return false
+	}
+	cfg, _ := config.Load()
+	return reconcileDeparted(store, panes, infos, nil, cfg.Advisor.GoneCheckAfter(), time.Now())
+}
+
+// reconcileDeparted is the testable half: tree is read lazily, and only
+// when some pane actually looks like it lost its agent, because a process
+// snapshot is expensive and this runs on every render.
+func reconcileDeparted(store *state.Store, panes []*state.Pane,
+	infos []tmuxctl.PaneInfo, hasAgent func(pid int) bool,
+	quiet time.Duration, now time.Time) bool {
+	byID := make(map[string]tmuxctl.PaneInfo, len(infos))
+	for _, info := range infos {
+		byID[info.ID] = info
+	}
+	var suspects []*state.Pane
+	for _, p := range panes {
+		if p.ParentPane != "" {
+			continue // teammates live and die with their parent
+		}
+		info, ok := byID[p.PaneID]
+		if !ok {
+			continue // the pane itself is gone: someone else's cleanup
+		}
+		if looksLikeAgent(info.Command, p.Agent) {
+			continue // still the agent's own TUI
+		}
+		if now.Sub(p.UpdatedAt) < quiet {
+			// a live agent writes state on every tool round; a pane showing
+			// a shell right after one is an agent running a Bash tool, not a
+			// departed one. Only the quiet ones are worth a process scan.
+			continue
+		}
+		suspects = append(suspects, p)
+	}
+	if len(suspects) == 0 {
+		return false
+	}
+	if hasAgent == nil {
+		tree, err := tmuxctl.Snapshot()
+		if err != nil {
+			return false // cannot tell — leave everything alone
+		}
+		hasAgent = tree.HasAgent
+	}
+
+	changed := false
+	for _, p := range suspects {
+		// a shell in the pane is normal while the agent runs a Bash tool;
+		// only an empty process tree means the agent is really gone
+		if hasAgent(byID[p.PaneID].PID) {
+			continue
+		}
+		if store.Delete(p.PaneID) != nil {
+			continue
+		}
+		changed = true
+		for _, other := range panes {
+			if other.ParentPane == p.PaneID {
+				store.Delete(other.PaneID)
+			}
+		}
+	}
+	return changed
+}
+
 func truncate(s string, max int) string {
 	s = strings.Join(strings.Fields(s), " ") // collapse newlines/whitespace
 	r := []rune(s)

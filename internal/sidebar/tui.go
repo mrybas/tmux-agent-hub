@@ -207,6 +207,19 @@ func (m *model) reload() {
 	if hookd.ReconcileInterrupted(m.store, panes) {
 		tmuxctl.RefreshStatus()
 	}
+	if hookd.ReconcileDeparted(m.store, panes) {
+		// an agent exited but left its pane behind: re-read without it
+		if fresh, err := m.store.List(); err == nil {
+			kept := fresh[:0]
+			for _, p := range fresh {
+				if _, alive := locs[p.PaneID]; alive || p.ParentPane != "" {
+					kept = append(kept, p)
+				}
+			}
+			panes = kept
+		}
+		tmuxctl.RefreshStatus()
+	}
 	m.counts = map[state.Status]int{}
 	m.byID = map[string]*state.Pane{}
 	m.reviews = map[string][]string{}

@@ -90,8 +90,19 @@ one. Three signals reconcile:
 - transcript silence — a "working" agent whose transcript has not grown
   for `advisor.stale_after` (15 minutes by default) is not working.
 
-`ReconcileInterrupted` runs from the renderers, which is why statuses
-heal without a daemon.
+A fourth signal answers a different question — not "what is this agent
+doing" but "is it there at all". Panes outlive agents: `/exit`, a crash
+or a `SIGKILL` leaves the pane running a shell, and a liveness check that
+only asks tmux whether the pane exists keeps that entry for ever.
+`ReconcileDeparted` therefore looks at tracked panes whose state has been
+quiet for `advisor.gone_after` and whose command is a plain shell, and
+drops them when the process table has no agent underneath. The two
+filters exist for cost and for correctness: a live agent writes state on
+every tool round, and a pane showing a shell mid-Bash-tool is not a
+departed agent.
+
+Both reconcilers run from the renderers, which is why statuses heal
+without a daemon.
 
 ## The live reviewer
 

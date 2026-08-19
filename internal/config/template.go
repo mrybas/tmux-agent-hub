@@ -102,6 +102,9 @@ grace_ms = 2000    # a hook can fire before the words that triggered it are on
                    # catch up before feeding what it has (0 = do not wait)
 stale_after = 900  # seconds of transcript silence after which a "working"
                    # agent is not working (its turn died without a Stop hook)
+gone_after = 60    # seconds of silence before the plugin checks whether the
+                   # agent still runs in its pane at all — one exiting without
+                   # a SessionEnd hook leaves its pane (and its row) behind
 # How much text each part of a review is worth, in runes. Most people never
 # touch these: the defaults are what a reviewer can read without drowning.
 # Raise arg_runes if long shell commands lose their tails in the delta.

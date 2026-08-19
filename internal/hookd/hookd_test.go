@@ -1499,6 +1499,63 @@ func TestBoundarySurvivesAFullQueueCeiling(t *testing.T) {
 	}
 }
 
+// An agent can exit and leave its pane behind — /exit, a crash, Ctrl+C
+// on a CLI that fires no SessionEnd. The pane is still alive, so a
+// pane-based liveness check kept the entry for ever: the sidebar and the
+// popups went on offering an agent that was not there.
+func TestReconcileDepartedDropsAgentsThatLeftTheirPane(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	now := time.Now()
+	for _, p := range []*state.Pane{
+		{PaneID: "%1", Agent: "claude", Status: state.StatusWaitingInput, Cwd: "/gone", UpdatedAt: now},
+		{PaneID: "%1~abc", Agent: "claude", ParentPane: "%1", Status: state.StatusDone, UpdatedAt: now},
+		{PaneID: "%2", Agent: "claude", Status: state.StatusWorking, Cwd: "/busy", UpdatedAt: now},
+		{PaneID: "%3", Agent: "claude", Status: state.StatusWorking, Cwd: "/tool", UpdatedAt: now},
+	} {
+		if err := store.Save(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	panes, _ := store.List()
+	infos := []tmuxctl.PaneInfo{
+		{ID: "%1", Command: "zsh", PID: 111},     // the agent left, the shell stayed
+		{ID: "%2", Command: "2.1.234", PID: 222}, // still the agent's own TUI
+		{ID: "%3", Command: "zsh", PID: 333},     // a shell, but the agent runs a Bash tool
+	}
+	hasAgent := func(pid int) bool { return pid == 333 }
+	const quiet = time.Minute
+
+	if !reconcileDeparted(store, panes, infos, hasAgent, quiet, now.Add(2*time.Minute)) {
+		t.Fatal("the departed agent must be noticed")
+	}
+	left := map[string]bool{}
+	fresh, _ := store.List()
+	for _, p := range fresh {
+		left[p.PaneID] = true
+	}
+	if left["%1"] {
+		t.Error("an agent whose pane is a shell again must be dropped")
+	}
+	if left["%1~abc"] {
+		t.Error("its teammates go with it")
+	}
+	if !left["%2"] {
+		t.Error("a running agent must be left alone")
+	}
+	if !left["%3"] {
+		t.Error("a shell pane with the agent still in its process tree is working, not gone")
+	}
+
+	// an agent that wrote state a moment ago is not a suspect at all: a
+	// shell in its pane is a Bash tool, and no process scan is spent on it
+	fresh, _ = store.List()
+	if reconcileDeparted(store, fresh, infos,
+		func(int) bool { t.Fatal("a recently active agent must not cost a process scan"); return false },
+		quiet, now) {
+		t.Error("nothing is departed while the state is fresh")
+	}
+}
+
 func TestParseVerdict(t *testing.T) {
 	cases := []struct {
 		reply    string

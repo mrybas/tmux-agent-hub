@@ -159,6 +159,14 @@ detected and adopted automatically, so nothing on screen is invisible in
 the sidebar. Their status stays best-effort until the session restarts
 with hooks.
 
+**Departed agents**: an agent that exits without a `SessionEnd` hook —
+killed, crashed, or a CLI that has none — leaves its pane behind, and
+the pane being alive is not the same as the agent being alive. A tracked
+pane that has gone quiet and now shows a plain shell is checked against
+the process table, and the entry is dropped when the agent is really
+gone (`advisor.gone_after` is how long "quiet" is; a shell showing while
+the agent runs a Bash tool is not it).
+
 ## Stuck detection
 
 Model-free heuristics run over every agent's recent tool calls, on each

@@ -519,6 +519,60 @@ func CaptureTail(paneID string, lines int) string {
 // PaneHasAgentProcess reports whether the pane's process tree contains an
 // agent binary — a pane can show "zsh" while an agent runs a Bash tool
 // inside it.
+// ProcessTree is one snapshot of the process table. Answering "is there
+// an agent under this pane" costs a full ps, so callers that ask about
+// many panes take a snapshot once and query it.
+type ProcessTree struct {
+	children map[int][]int
+	agentish map[int]bool
+}
+
+// Snapshot reads the process table once.
+func Snapshot() (ProcessTree, error) {
+	t := ProcessTree{children: map[int][]int{}, agentish: map[int]bool{}}
+	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
+	if err != nil {
+		return t, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		var pid, ppid int
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		fmt.Sscanf(fields[0], "%d", &pid)
+		fmt.Sscanf(fields[1], "%d", &ppid)
+		cmd := strings.Join(fields[2:], " ")
+		t.children[ppid] = append(t.children[ppid], pid)
+		if strings.Contains(cmd, "claude") || strings.Contains(cmd, "codex") ||
+			strings.Contains(cmd, "/versions/") {
+			t.agentish[pid] = true
+		}
+	}
+	return t, nil
+}
+
+// HasAgent reports whether an agent process runs under this pane — the
+// pane's own command may be a shell while the agent runs a Bash tool.
+func (t ProcessTree) HasAgent(panePID int) bool {
+	var walk func(pid, depth int) bool
+	walk = func(pid, depth int) bool {
+		if t.agentish[pid] {
+			return true
+		}
+		if depth > 6 {
+			return false
+		}
+		for _, c := range t.children[pid] {
+			if walk(c, depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(panePID, 0)
+}
+
 func PaneHasAgentProcess(panePID int) bool {
 	out, err := exec.Command("ps", "-axo", "pid=,ppid=,command=").Output()
 	if err != nil {

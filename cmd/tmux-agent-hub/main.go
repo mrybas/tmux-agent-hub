@@ -406,6 +406,9 @@ func statuslineCmd() error {
 		panes = kept
 	}
 	hookd.ReconcileInterrupted(store, panes)
+	if hookd.ReconcileDeparted(store, panes) {
+		panes, _ = store.List() // an agent exited without a SessionEnd hook
+	}
 	if adoptUntracked(store, panes) {
 		panes, _ = store.List() // re-read to include the adopted agents
 	}

@@ -131,6 +131,7 @@ type Advisor struct {
 	Queue       int `toml:"queue"`        // workers that may wait for one busy reviewer
 	GraceMS     int `toml:"grace_ms"`     // how long a turn boundary waits for the transcript to catch up
 	StaleAfter  int `toml:"stale_after"`  // seconds of transcript silence before a "working" agent is not working
+	GoneAfter   int `toml:"gone_after"`   // seconds of silence before checking whether the agent still runs in its pane
 }
 
 // Advisor limits, resolved: a value the user left out (or set to
@@ -165,6 +166,14 @@ func (a Advisor) BoundaryGrace() time.Duration {
 
 func (a Advisor) StaleWorkingAfter() time.Duration {
 	return seconds(a.StaleAfter, Default().Advisor.StaleAfter)
+}
+
+// GoneCheckAfter is how long an agent's state may sit untouched before we
+// spend a process-table scan on "is this agent still there at all". A live
+// agent writes state on every tool round, so the quiet ones are the only
+// suspects worth the cost.
+func (a Advisor) GoneCheckAfter() time.Duration {
+	return seconds(a.GoneAfter, Default().Advisor.GoneAfter)
 }
 
 // TextBudget resolves one of the rune limits, falling back to the default
@@ -270,7 +279,8 @@ func Default() Config {
 		Debug:   Debug{AdvisorLog: true, LogMaxKB: 1024},
 		Advisor: Advisor{
 			Mode: "live", MinInterval: 45, CatchUpMax: 20,
-			AdviceMax: 3, LostAfter: 600, Queue: 8, GraceMS: 2000, StaleAfter: 900,
+			AdviceMax: 3, LostAfter: 600, Queue: 8, GraceMS: 2000,
+			StaleAfter: 900, GoneAfter: 60,
 			DeltaRunes: 7000, ArgRunes: 200, ErrorRunes: 500,
 			ReportRunes: 1200, AdviceRunes: 2000, OutputRunes: 8000,
 		},
