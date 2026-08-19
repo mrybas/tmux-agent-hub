@@ -83,6 +83,74 @@ func TestBuildRowsFilter(t *testing.T) {
 	}
 }
 
+// What a session is scanned for is what is running in it right now, so
+// working agents come first inside their own group — without disturbing
+// the group order or the inbox above it.
+func TestBuildRowsPutsWorkingAgentsFirstInEachGroup(t *testing.T) {
+	now := time.Now()
+	panes := []*state.Pane{
+		{PaneID: "%1", Agent: "claude", Status: state.StatusWaitingInput, Cwd: "/a", StatusSince: now},
+		{PaneID: "%2", Agent: "claude", Status: state.StatusWorking, Cwd: "/a", StatusSince: now},
+		{PaneID: "%3", Agent: "claude", Status: state.StatusDone, Cwd: "/a", StatusSince: now},
+		{PaneID: "%4", Agent: "claude", Status: state.StatusWaitingInput, Cwd: "/b", StatusSince: now},
+		{PaneID: "%5", Agent: "claude", Status: state.StatusWorking, Cwd: "/b", StatusSince: now},
+	}
+	locs := map[string]tmuxctl.Location{}
+	spec := config.ViewSpec{Row: "compact", Group: "folder", Sort: "activity"}
+
+	var order []string
+	for _, r := range BuildRows(panes, locs, "", spec, "") {
+		if r.Header {
+			order = append(order, "["+r.Folder+"]")
+			continue
+		}
+		order = append(order, r.Pane.PaneID)
+	}
+
+	// inbox first (the done one), then each folder with its worker on top
+	want := []string{"[inbox · 1]", "%3", "[/a]", "%2", "%1", "[/b]", "%5", "%4"}
+	if len(order) != len(want) {
+		t.Fatalf("rows = %v, want %v", order, want)
+	}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("rows = %v, want %v", order, want)
+		}
+	}
+}
+
+// The same, grouped by session: "first in this session" is the point of
+// the ordering, and the session order itself must not move.
+func TestBuildRowsWorkingFirstWithinSessions(t *testing.T) {
+	now := time.Now()
+	panes := []*state.Pane{
+		{PaneID: "%1", Agent: "claude", Status: state.StatusWaitingInput, Cwd: "/a", StatusSince: now},
+		{PaneID: "%2", Agent: "claude", Status: state.StatusWorking, Cwd: "/b", StatusSince: now},
+		{PaneID: "%3", Agent: "claude", Status: state.StatusWorking, Cwd: "/c", StatusSince: now},
+		{PaneID: "%4", Agent: "claude", Status: state.StatusWaitingInput, Cwd: "/d", StatusSince: now},
+	}
+	locs := map[string]tmuxctl.Location{
+		"%1": {Session: "work"}, "%2": {Session: "work"},
+		"%3": {Session: "home"}, "%4": {Session: "home"},
+	}
+	spec := config.ViewSpec{Row: "compact", Group: "session", Sort: "activity"}
+
+	var order []string
+	for _, r := range BuildRows(panes, locs, "", spec, "home") {
+		if r.Header {
+			order = append(order, "["+r.Folder+"]")
+			continue
+		}
+		order = append(order, r.Pane.PaneID)
+	}
+	want := []string{"[home · 2]", "%3", "%4", "[work · 2]", "%2", "%1"}
+	for i := range want {
+		if i >= len(order) || order[i] != want[i] {
+			t.Fatalf("rows = %v, want %v (current session first, workers on top of each)", order, want)
+		}
+	}
+}
+
 func TestLabel(t *testing.T) {
 	if l := Label(&state.Pane{Agent: "claude", LastPrompt: "hi", Title: "my task"}); l != "my task" {
 		t.Errorf("title must win, got %q", l)

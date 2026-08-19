@@ -128,6 +128,12 @@ Grouping is a separate knob that survives view switching:
 `group = "folder"` (default), `"session"` (group by tmux session,
 current session first, agent count in the header), or `"none"`.
 
+Inside every group the agents that are **working right now** come first —
+that is what you scan a session for. The rest keep their stable order, and
+the groups themselves do not move. Set `sort = "path"` for a plain
+directory order, or `sort = "urgency"` to put whoever needs you first
+everywhere, not just in the inbox.
+
 Keys inside the sidebar:
 
 | Key | Action |

@@ -73,7 +73,7 @@ type Sidebar struct {
 	View     string `toml:"view"`     // preset: rich | compact | tree
 	Row      string `toml:"row"`      // "" | rich | compact
 	Group    string `toml:"group"`    // "" | folder | session | none
-	Sort     string `toml:"sort"`     // "" | path | urgency
+	Sort     string `toml:"sort"`     // "" | activity | path | urgency
 	Guides   string `toml:"guides"`   // "" | on | off
 }
 
@@ -363,14 +363,14 @@ func overlayTheme(cfg *Config, name string) error {
 type ViewSpec struct {
 	Row    string // "rich" | "compact"
 	Group  string // "folder" | "session" | "none"
-	Sort   string // "path" | "urgency"
+	Sort   string // "activity" | "path" | "urgency"
 	Guides bool
 }
 
 var viewPresets = map[string]ViewSpec{
-	"rich":    {Row: "rich", Group: "folder", Sort: "path"},
-	"compact": {Row: "compact", Group: "folder", Sort: "path"},
-	"tree":    {Row: "compact", Group: "folder", Sort: "path", Guides: true},
+	"rich":    {Row: "rich", Group: "folder", Sort: "activity"},
+	"compact": {Row: "compact", Group: "folder", Sort: "activity"},
+	"tree":    {Row: "compact", Group: "folder", Sort: "activity", Guides: true},
 }
 
 // ViewPresetNames is the cycle order for the sidebar's live view switch.

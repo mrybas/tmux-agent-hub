@@ -156,7 +156,10 @@ view = "rich"     # preset: rich — two-line rows with prompts
 # Fine-tuning: any non-empty knob overrides the preset.
 # row = "rich"     # rich | compact
 # group = "folder" # folder | session | none
-# sort = "path"    # path | urgency
+# sort = "path"    # activity — agents that are working come first inside
+                   #            each group (default)
+                   # path     — plain, stable order by directory
+                   # urgency  — the ones needing you first, everywhere
 # guides = "off"   # on | off
 `
 

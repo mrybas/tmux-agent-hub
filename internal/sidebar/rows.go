@@ -57,6 +57,34 @@ func UntrackedAgents(infos []tmuxctl.PaneInfo, tracked map[string]bool, selfPane
 	return panes
 }
 
+// sortWorkingFirst puts the agents that are doing something at the top of
+// their own group, leaving the groups themselves — and everything inside
+// them — in the order they were already in. What the user scans a session
+// for is what is running in it right now.
+func sortWorkingFirst(tops []*state.Pane, locs map[string]tmuxctl.Location, group string) {
+	key := func(p *state.Pane) string {
+		if group == "session" {
+			return locs[p.PaneID].Session
+		}
+		return ShortPath(p.Cwd) // "folder", and a single group for "none"
+	}
+	// the group order is whatever brought us here; rank preserves it
+	rank := map[string]int{}
+	for _, p := range tops {
+		if k := key(p); rank[k] == 0 {
+			rank[k] = len(rank) + 1
+		}
+	}
+	working := func(p *state.Pane) bool { return p.Display() == state.StatusWorking }
+	sort.SliceStable(tops, func(i, j int) bool {
+		if ri, rj := rank[key(tops[i])], rank[key(tops[j])]; ri != rj {
+			return ri < rj
+		}
+		wi, wj := working(tops[i]), working(tops[j])
+		return wi && !wj
+	})
+}
+
 // urgencyRank orders statuses by how much they need the user.
 var urgencyRank = map[state.Status]int{
 	state.StatusWaitingPermission: 0,
@@ -103,6 +131,10 @@ func BuildRows(panes []*state.Pane, locs map[string]tmuxctl.Location, filter str
 		} else {
 			tops = append(tops, p)
 		}
+	}
+
+	if spec.Sort == "activity" {
+		sortWorkingFirst(tops, locs, spec.Group)
 	}
 
 	sessionCount := map[string]int{}

@@ -94,7 +94,7 @@ func TestStatuslineOptions(t *testing.T) {
 func TestSidebarViewResolution(t *testing.T) {
 	c := Default() // view = rich
 	v := c.SidebarView()
-	if v.Row != "rich" || v.Group != "folder" || v.Sort != "path" || v.Guides {
+	if v.Row != "rich" || v.Group != "folder" || v.Sort != "activity" || v.Guides {
 		t.Errorf("rich preset wrong: %+v", v)
 	}
 	c.Sidebar.View = "tree"
