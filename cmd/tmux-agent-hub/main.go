@@ -310,6 +310,7 @@ func adoptUntracked(store *state.Store, panes []*state.Pane) bool {
 	if err != nil {
 		return false
 	}
+	cfg, _ := config.Load()
 	tracked := map[string]bool{}
 	cwdCount := map[string]int{}
 	for _, p := range panes {
@@ -369,7 +370,11 @@ func adoptUntracked(store *state.Store, panes []*state.Pane) bool {
 						newest, newestAt = m, st.ModTime()
 					}
 				}
-				if newest != "" {
+				// only if it is plausibly this session: a transcript nobody
+				// has written to for a long time belongs to an agent that
+				// finished, and attaching it shows a fresh pane wearing the
+				// last words of a session that is over
+				if newest != "" && time.Since(newestAt) < cfg.Advisor.StaleWorkingAfter() {
 					u.TranscriptPath = newest
 					u.SessionID = strings.TrimSuffix(filepath.Base(newest), ".jsonl")
 				}

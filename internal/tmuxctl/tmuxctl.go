@@ -415,6 +415,23 @@ func PanesFull() ([]PaneInfo, error) {
 	return infos, nil
 }
 
+// PaneInfoFor is PanesFull for one pane: command, path and pid in a
+// single tmux call.
+func PaneInfoFor(paneID string) (PaneInfo, bool) {
+	out, err := output("display-message", "-p", "-t", paneID,
+		"#{pane_id}\t#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}")
+	if err != nil {
+		return PaneInfo{}, false
+	}
+	parts := strings.SplitN(strings.TrimSpace(out), "\t", 4)
+	if len(parts) != 4 {
+		return PaneInfo{}, false
+	}
+	info := PaneInfo{ID: parts[0], Path: parts[1], Command: parts[2]}
+	fmt.Sscanf(parts[3], "%d", &info.PID)
+	return info, true
+}
+
 // PaneByTTY maps a tty device (e.g. "/dev/ttys013" or "ttys013") to the
 // pane running on it.
 func PaneByTTY(tty string) string {

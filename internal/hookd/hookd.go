@@ -316,6 +316,13 @@ func apply(store *state.Store, paneID string, pl *payload, now time.Time) error 
 	}
 
 	cfg, _ := config.Load() // broken config → defaults, never break a hook
+	if _, known := store.Load(paneID); known != nil && !paneRunsAgent(paneID, pl.agent) {
+		// A pane we do not track, with no agent in it: a late event from a
+		// session whose pane is gone, resolved onto some shell that happens
+		// to sit in the same directory. Tracking it would put an agent in
+		// the sidebar where the user can plainly see there is none.
+		return nil
+	}
 	p := store.LoadOrNew(paneID)
 	prevDisplay := p.Display()
 	if parent, _, ok := strings.Cut(paneID, "~"); ok && parent != paneID {
@@ -511,6 +518,25 @@ func isUserPrompt(prompt string) bool {
 		!strings.HasPrefix(prompt, ReqMarker) && !strings.HasPrefix(prompt, AdvMarker)
 }
 
+// paneRunsAgent reports whether an agent is actually running in a pane.
+// The pane's own command is the cheap answer; the process tree is the
+// reliable one, because a pane shows its shell while the agent runs a
+// Bash tool. When tmux cannot say, the answer is yes: a hook must never
+// be dropped on a guess.
+func paneRunsAgent(paneID, agent string) bool {
+	if parent, _, ok := strings.Cut(paneID, "~"); ok {
+		paneID = parent // teammates live in their parent's pane
+	}
+	info, ok := tmuxctl.PaneInfoFor(paneID)
+	if !ok {
+		return true
+	}
+	if looksLikeAgent(info.Command, agent) {
+		return true
+	}
+	return tmuxctl.PaneHasAgentProcess(info.PID)
+}
+
 // ReconcileDeparted drops agents whose pane outlived them. A pane that is
 // a shell again means the agent exited without a SessionEnd hook — killed,
 // crashed, or a CLI that never fires one — and the entry would otherwise
@@ -572,6 +598,14 @@ func reconcileDeparted(store *state.Store, panes []*state.Pane,
 		// only an empty process tree means the agent is really gone
 		if hasAgent(byID[p.PaneID].PID) {
 			continue
+		}
+		// Claude Code can host a session in a daemon, where the agent is
+		// not under the pane at all. Its transcript is then the only proof
+		// of life — and a fresh one outranks an empty process tree.
+		if p.TranscriptPath != "" {
+			if st, err := os.Stat(p.TranscriptPath); err == nil && now.Sub(st.ModTime()) < quiet {
+				continue
+			}
 		}
 		if store.Delete(p.PaneID) != nil {
 			continue

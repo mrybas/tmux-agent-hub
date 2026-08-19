@@ -1546,6 +1546,22 @@ func TestReconcileDepartedDropsAgentsThatLeftTheirPane(t *testing.T) {
 		t.Error("a shell pane with the agent still in its process tree is working, not gone")
 	}
 
+	// a daemon-hosted session runs outside the pane's process tree: a
+	// transcript still being written is what says it is alive
+	daemon := filepath.Join(t.TempDir(), "d.jsonl")
+	os.WriteFile(daemon, []byte("{}\n"), 0o644)
+	// written "just now" as of the moment the check runs
+	written := now.Add(2 * time.Minute)
+	os.Chtimes(daemon, written, written)
+	store.Save(&state.Pane{PaneID: "%4", Agent: "claude", Status: state.StatusWaitingInput,
+		Cwd: "/daemon", TranscriptPath: daemon, UpdatedAt: now})
+	panes, _ = store.List()
+	infos = append(infos, tmuxctl.PaneInfo{ID: "%4", Command: "zsh", PID: 444})
+	reconcileDeparted(store, panes, infos, func(int) bool { return false }, quiet, now.Add(2*time.Minute))
+	if _, err := store.Load("%4"); err != nil {
+		t.Error("an agent whose transcript is still being written is alive, wherever its process lives")
+	}
+
 	// an agent that wrote state a moment ago is not a suspect at all: a
 	// shell in its pane is a Bash tool, and no process scan is spent on it
 	fresh, _ = store.List()
@@ -1553,6 +1569,30 @@ func TestReconcileDepartedDropsAgentsThatLeftTheirPane(t *testing.T) {
 		func(int) bool { t.Fatal("a recently active agent must not cost a process scan"); return false },
 		quiet, now) {
 		t.Error("nothing is departed while the state is fresh")
+	}
+}
+
+// A late event from an agent whose pane is gone can resolve onto some
+// unrelated shell that happens to sit in the same directory. Tracking it
+// puts an agent in the sidebar where the user can see there is none — and
+// it comes back every time such an event lands, so cleanup alone is not
+// an answer.
+func TestUnknownPaneWithoutAnAgentIsNotTracked(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	now := time.Now()
+
+	// tmux is unreachable in tests, so paneRunsAgent cannot tell and the
+	// event is kept — a hook is never dropped on a guess
+	apply(store, "%1", &payload{HookEventName: "SessionStart", Cwd: "/proj"}, now)
+	if _, err := store.Load("%1"); err != nil {
+		t.Fatal("an undecidable pane must still be tracked")
+	}
+
+	// an already-tracked pane is updated whatever its command is now: the
+	// agent may simply be running a Bash tool
+	apply(store, "%1", &payload{HookEventName: "Stop"}, now)
+	if p, _ := store.Load("%1"); p.Status != state.StatusDone {
+		t.Error("a tracked pane must keep receiving its events")
 	}
 }
 
