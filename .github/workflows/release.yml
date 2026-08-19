@@ -30,11 +30,11 @@ jobs:
           printf '%s' "$TAG" | grep -Eq '^v[0-9A-Za-z.+-]+$' \
             || { echo "tag '$TAG' has characters we will not put in a filename"; exit 1; }
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: '1.24'
           check-latest: true
