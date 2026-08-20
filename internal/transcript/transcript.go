@@ -112,6 +112,11 @@ type Reader interface {
 func For(agent, path string) Reader { return ForBudgets(agent, path, DefaultBudgets()) }
 
 // ForBudgets is For with the caller's delta sizing.
+//
+// opencode has no transcript of its own that we can read — its sessions
+// live in a SQLite database — so our plugin writes one for it, in the
+// same JSONL shape Claude Code uses. That is why it reads with the same
+// reader: the file is ours, and it is written to be read by this code.
 func ForBudgets(agent, path string, b Budgets) Reader {
 	b = b.resolved()
 	if agent == "codex" {

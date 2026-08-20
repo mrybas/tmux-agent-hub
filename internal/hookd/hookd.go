@@ -536,6 +536,8 @@ func AgentKindInPane(command string) string {
 		return "claude"
 	case strings.HasPrefix(command, "codex"):
 		return "codex"
+	case strings.HasPrefix(command, "opencode"):
+		return "opencode"
 	}
 	return ""
 }
@@ -606,6 +608,10 @@ func reconcileDeparted(store *state.Store, panes []*state.Pane,
 	for _, info := range infos {
 		byID[info.ID] = info
 	}
+	// Resolution is permissive about what looks like an agent — anything
+	// that is not a known shell might be one. Reconciliation must be the
+	// opposite: a pane showing vim, or a stray sleep, is a pane whose agent
+	// left, and only the process tree can overrule that.
 	var suspects []*state.Pane
 	for _, p := range panes {
 		if p.ParentPane != "" {
@@ -615,8 +621,8 @@ func reconcileDeparted(store *state.Store, panes []*state.Pane,
 		if !ok {
 			continue // the pane itself is gone: someone else's cleanup
 		}
-		if looksLikeAgent(info.Command, p.Agent) {
-			continue // still the agent's own TUI
+		if AgentKindInPane(info.Command) != "" {
+			continue // still an agent's own TUI
 		}
 		if now.Sub(p.UpdatedAt) < quiet {
 			// a live agent writes state on every tool round; a pane showing

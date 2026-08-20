@@ -1,6 +1,7 @@
 package hookd
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +33,58 @@ var codexEvents = []string{
 	"PermissionRequest",
 	"Stop",
 	"SessionEnd",
+}
+
+//go:embed plugins/opencode.js
+var opencodePlugin string
+
+// opencodePluginPath is where opencode loads global plugins from. Unlike
+// the others, opencode has no hooks file: a plugin is a JavaScript module
+// dropped in that directory, and it both reports events and writes the
+// transcript we read (see plugins/opencode.js).
+func opencodePluginPath() (string, bool) {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		base = filepath.Join(home, ".config")
+	}
+	dir := filepath.Join(base, "opencode")
+	if _, err := os.Stat(dir); err != nil {
+		return "", false // opencode is not set up here
+	}
+	return filepath.Join(dir, "plugins", "tmux-agent-hub.js"), true
+}
+
+func installOpencodePlugin(binPath string) error {
+	path, ok := opencodePluginPath()
+	if !ok {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	body := strings.ReplaceAll(opencodePlugin, "__TMUX_AGENT_HUB_BIN__", binPath)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return err
+	}
+	fmt.Println("opencode plugin written to", path)
+	fmt.Println("NOTE: opencode loads plugins at startup — restart a running session to pick it up.")
+	return nil
+}
+
+func uninstallOpencodePlugin() error {
+	path, ok := opencodePluginPath()
+	if !ok {
+		return nil
+	}
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // commandMarker identifies our entries in an agent's hook file.
@@ -75,7 +128,7 @@ func Install(binPath string) error {
 		fmt.Println("Codex hooks written to", codexPath)
 		fmt.Println("NOTE: Codex requires trusting them once — run /hooks inside Codex and approve.")
 	}
-	return nil
+	return installOpencodePlugin(binPath)
 }
 
 // Uninstall removes every tmux-agent-hub hook entry from both files.
@@ -88,9 +141,11 @@ func Uninstall() error {
 		return err
 	}
 	if codexPath, ok := codexHooksPath(); ok {
-		return uninstallFrom(codexPath)
+		if err := uninstallFrom(codexPath); err != nil {
+			return err
+		}
 	}
-	return nil
+	return uninstallOpencodePlugin()
 }
 
 func installInto(path string, events []string, cmd string) error {

@@ -273,7 +273,7 @@ func Default() Config {
 				Dead:              "✗",
 				Stuck:             "!",
 			},
-			AgentGlyphs: map[string]string{"claude": "✳", "codex": "⬢", "default": "●"},
+			AgentGlyphs: map[string]string{"claude": "✳", "codex": "⬢", "opencode": "◆", "default": "●"},
 		},
 		Sidebar: Sidebar{Width: 42, Position: "left", View: "rich"},
 		Debug:   Debug{AdvisorLog: true, LogMaxKB: 1024},

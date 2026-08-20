@@ -132,6 +132,55 @@ func TestInstallIsIdempotentAndPreservesForeignHooks(t *testing.T) {
 	}
 }
 
+// opencode has no hooks file to write into: it loads plugins from a
+// directory, and ours is what reports events and writes the transcript.
+// Installing must drop it in place, and uninstalling must take it away.
+func TestOpencodePluginInstallAndRemove(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfg)
+
+	// no opencode on this machine: nothing to install, and no complaint
+	if err := installOpencodePlugin("/bin/hub"); err != nil {
+		t.Fatalf("a machine without opencode must not be an error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg, "opencode", "plugins")); err == nil {
+		t.Error("nothing may be created for an agent that is not installed")
+	}
+
+	// opencode is set up: the plugin lands in its plugin directory
+	if err := os.MkdirAll(filepath.Join(cfg, "opencode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installOpencodePlugin("/bin/hub"); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(cfg, "opencode", "plugins", "tmux-agent-hub.js")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("plugin not installed: %v", err)
+	}
+	if !strings.Contains(string(body), `"/bin/hub"`) {
+		t.Error("the plugin must call the binary it was installed from")
+	}
+	if strings.Contains(string(body), "__TMUX_AGENT_HUB_BIN__") {
+		t.Error("the placeholder must be replaced")
+	}
+
+	// installing twice is the same as installing once
+	if err := installOpencodePlugin("/bin/hub"); err != nil {
+		t.Fatal(err)
+	}
+	if err := uninstallOpencodePlugin(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("uninstall must remove the plugin")
+	}
+	if err := uninstallOpencodePlugin(); err != nil {
+		t.Errorf("removing what is already gone is not an error: %v", err)
+	}
+}
+
 func TestStopLearnsModelFromTranscript(t *testing.T) {
 	tr := filepath.Join(t.TempDir(), "t.jsonl")
 	line := `{"type":"assistant","message":{"role":"assistant","model":"claude-fable-5","content":[{"type":"text","text":"done"}]}}`
@@ -1517,10 +1566,14 @@ func TestReconcileDepartedDropsAgentsThatLeftTheirPane(t *testing.T) {
 		}
 	}
 	panes, _ := store.List()
+	store.Save(&state.Pane{PaneID: "%5", Agent: "claude", Status: state.StatusWaitingInput,
+		Cwd: "/editor", UpdatedAt: now})
+	panes, _ = store.List()
 	infos := []tmuxctl.PaneInfo{
 		{ID: "%1", Command: "zsh", PID: 111},     // the agent left, the shell stayed
 		{ID: "%2", Command: "2.1.234", PID: 222}, // still the agent's own TUI
 		{ID: "%3", Command: "zsh", PID: 333},     // a shell, but the agent runs a Bash tool
+		{ID: "%5", Command: "nvim", PID: 555},    // the user took the pane over
 	}
 	hasAgent := func(pid int) bool { return pid == 333 }
 	const quiet = time.Minute
@@ -1544,6 +1597,9 @@ func TestReconcileDepartedDropsAgentsThatLeftTheirPane(t *testing.T) {
 	}
 	if !left["%3"] {
 		t.Error("a shell pane with the agent still in its process tree is working, not gone")
+	}
+	if left["%5"] {
+		t.Error("a pane the user gave to an editor holds no agent either")
 	}
 
 	// a daemon-hosted session runs outside the pane's process tree: a
@@ -1622,7 +1678,8 @@ func TestTrackPaneAdoptsWhatTheUserPointsAt(t *testing.T) {
 func TestAgentKindInPane(t *testing.T) {
 	cases := map[string]string{
 		"2.1.235": "claude", "claude": "claude", "codex": "codex",
-		"zsh": "", "nvim": "", "": "", "node": "",
+		"opencode": "opencode",
+		"zsh":      "", "nvim": "", "": "", "node": "",
 	}
 	for command, want := range cases {
 		if got := AgentKindInPane(command); got != want {

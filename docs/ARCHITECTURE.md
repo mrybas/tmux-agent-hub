@@ -271,6 +271,16 @@ hooks file of its own, register it in `internal/hookd/install.go` next
 to `codexEvents` — installation must stay idempotent and must never
 touch entries that are not ours.
 
+When an agent has no transcript we can follow — opencode keeps its
+sessions in SQLite — the integration can write one instead. Our opencode
+plugin (`internal/hookd/plugins/opencode.js`, embedded and installed into
+`~/.config/opencode/plugins/`) subscribes to opencode's event stream and
+appends prompts, replies and tool calls in Claude Code's JSONL shape.
+That is why `ForBudgets` hands opencode the Claude reader: the file is
+ours, written to be read by this code, and everything downstream — the
+review delta, the timeline, the detectors — works without knowing which
+agent produced it.
+
 **2. A transcript reader.** Implement `transcript.Reader` (see
 `internal/transcript/codex.go` for a full example) and register it in
 `ForBudgets` (`For` is the same thing with default sizing):

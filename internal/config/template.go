@@ -142,6 +142,7 @@ stuck = "!"
 [statusline.agent_glyphs] # used with style = "agent"
 claude = "✳"
 codex = "⬢"
+opencode = "◆"
 default = "●"
 
 [sidebar]

@@ -33,7 +33,7 @@ small JSON files. When nothing happens, tmux-agent-hub costs nothing.
 - `curl` or `wget` — to fetch the release binary on first run
 - Go ≥ 1.24 only if you build it yourself (hacking on the plugin)
 - [fzf](https://github.com/junegunn/fzf) — optional, for `prefix+f` search
-- Claude Code and/or Codex CLI
+- Claude Code, Codex CLI and/or opencode
 
 ## Installation
 
@@ -70,7 +70,11 @@ It registers hooks in:
 - `~/.claude/settings.json` — Claude Code (existing settings preserved,
   a `.bak-tmux-agent-hub` backup is written);
 - `~/.codex/hooks.json` — Codex CLI, when `~/.codex` exists. Codex
-  requires trusting hooks once: run `/hooks` inside Codex and approve.
+  requires trusting hooks once: run `/hooks` inside Codex and approve;
+- `~/.config/opencode/plugins/tmux-agent-hub.js` — opencode, when
+  `~/.config/opencode` exists. opencode has no hooks file: plugins are
+  JavaScript modules it loads at startup, so a running session picks this
+  up only after a restart.
 
 Agent sessions pick hooks up on start; sessions that were already running
 appear in the sidebar immediately (adopted with limited detail) and gain
@@ -581,21 +585,30 @@ scraped from the screen.
 
 ## Agent support
 
-| | Claude Code | Codex CLI |
-|---|---|---|
-| statuses, prompts, current tool | ✅ | ✅ |
-| model in sidebar | ✅ | ✅ (from event payload) |
-| advisor as target | ✅ | ✅ |
-| advisor as source (transcript) | ✅ | ✅ |
-| live reviewer | ✅ both roles | ✅ both roles |
-| activity timeline | ✅ | ✅ |
-| reasoning-level analysis | ✅ | ➖ (rollout stores it encrypted) |
-| interrupt detection | ✅ | ➖ (no abort marker; stale-detection covers it) |
-| skills inspector | ✅ | ✅ (AGENTS.md, system/user/plugin skills, MCP) |
+| | Claude Code | Codex CLI | opencode |
+|---|---|---|---|
+| statuses, prompts, current tool | ✅ | ✅ | ✅ |
+| model in sidebar | ✅ | ✅ (from event payload) | ✅ |
+| advisor as target | ✅ | ✅ | ✅ |
+| advisor as source (transcript) | ✅ | ✅ | ✅ (written by our plugin) |
+| live reviewer | ✅ both roles | ✅ both roles | ✅ both roles |
+| activity timeline | ✅ | ✅ | ✅ |
+| reasoning-level analysis | ✅ | ➖ (rollout stores it encrypted) | ➖ |
+| interrupt detection | ✅ | ➖ (no abort marker; stale-detection covers it) | ➖ |
+| skills inspector | ✅ | ✅ (AGENTS.md, system/user/plugin skills, MCP) | ➖ not yet |
+
+opencode keeps its sessions in a SQLite database rather than in files we
+can follow, so the plugin we install writes a transcript of its own —
+prompts, replies, tool calls with their arguments and output — in the
+same JSONL shape Claude Code uses, under
+`~/.local/state/tmux-agent-hub/opencode/`. Everything downstream (the
+review feed, the timeline, the detectors) then works the same for all
+three agents.
 
 Custom agents can be integrated by calling
 `tmux-agent-hub hook <agent-name>` from their lifecycle hooks with a
-Claude-Code-shaped JSON payload on stdin.
+Claude-Code-shaped JSON payload on stdin — that is all the opencode
+plugin does, from JavaScript.
 
 ## Debugging
 
