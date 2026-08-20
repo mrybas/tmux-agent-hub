@@ -585,7 +585,13 @@ func (m *model) applyAssign() {
 	if m.assignCursor == 0 {
 		err = m.store.UnlinkReviewer(p.PaneID)
 	} else {
-		err = m.store.LinkReviewer(p.PaneID, m.assignOpts[m.assignCursor-1].Pane.PaneID)
+		reviewer := m.assignOpts[m.assignCursor-1].Pane.PaneID
+		// the pane may be an agent we have never had an event from (its
+		// hooks are new, or it has not spoken yet) — the user pointing at
+		// it is evidence enough
+		if err = hookd.TrackPane(m.store, reviewer, time.Now()); err == nil {
+			err = m.store.LinkReviewer(p.PaneID, reviewer)
+		}
 	}
 	if err != nil {
 		m.status = err.Error()

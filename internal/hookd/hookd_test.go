@@ -1596,6 +1596,41 @@ func TestUnknownPaneWithoutAnAgentIsNotTracked(t *testing.T) {
 	}
 }
 
+// Picking a reviewer must work for a pane whose agent has not spoken to
+// us yet: its hooks may be minutes old, or its last session ended and the
+// new one has fired nothing so far. The user can see what is in the pane;
+// that beats waiting for an event.
+func TestTrackPaneAdoptsWhatTheUserPointsAt(t *testing.T) {
+	store := state.NewStore(t.TempDir())
+	now := time.Now()
+
+	// tmux is unreachable in tests, so the pane cannot be inspected
+	if err := TrackPane(store, "%354", now); err == nil {
+		t.Error("without tmux there is nothing to adopt")
+	}
+
+	// an already-tracked pane is left exactly as it was
+	store.Save(&state.Pane{PaneID: "%9", Agent: "codex", Cwd: "/proj", SessionID: "s1"})
+	if err := TrackPane(store, "%9", now); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := store.Load("%9"); p.SessionID != "s1" {
+		t.Error("tracking must not overwrite what the hooks already know")
+	}
+}
+
+func TestAgentKindInPane(t *testing.T) {
+	cases := map[string]string{
+		"2.1.235": "claude", "claude": "claude", "codex": "codex",
+		"zsh": "", "nvim": "", "": "", "node": "",
+	}
+	for command, want := range cases {
+		if got := AgentKindInPane(command); got != want {
+			t.Errorf("AgentKindInPane(%q) = %q, want %q", command, got, want)
+		}
+	}
+}
+
 func TestParseVerdict(t *testing.T) {
 	cases := []struct {
 		reply    string

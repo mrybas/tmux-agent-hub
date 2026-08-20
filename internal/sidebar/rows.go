@@ -5,11 +5,11 @@ package sidebar
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/mrybas/tmux-agent-hub/internal/config"
+	"github.com/mrybas/tmux-agent-hub/internal/hookd"
 	"github.com/mrybas/tmux-agent-hub/internal/state"
 	"github.com/mrybas/tmux-agent-hub/internal/tmuxctl"
 )
@@ -25,10 +25,6 @@ type Row struct {
 	Inbox   bool // pinned in the inbox section (needs the user)
 }
 
-// agentPaneRe matches pane commands that look like an agent TUI: claude's
-// versioned binaries ("2.1.234"), or the agent names themselves.
-var agentPaneRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)+$`)
-
 // UntrackedAgents synthesizes entries for panes that run an agent but have
 // produced no hook events yet (sessions started before install-hooks).
 func UntrackedAgents(infos []tmuxctl.PaneInfo, tracked map[string]bool, selfPane string) []*state.Pane {
@@ -37,13 +33,8 @@ func UntrackedAgents(infos []tmuxctl.PaneInfo, tracked map[string]bool, selfPane
 		if tracked[info.ID] || info.ID == selfPane {
 			continue
 		}
-		agent := ""
-		switch {
-		case agentPaneRe.MatchString(info.Command), strings.HasPrefix(info.Command, "claude"):
-			agent = "claude"
-		case strings.HasPrefix(info.Command, "codex"):
-			agent = "codex"
-		default:
+		agent := hookd.AgentKindInPane(info.Command)
+		if agent == "" {
 			continue
 		}
 		panes = append(panes, &state.Pane{

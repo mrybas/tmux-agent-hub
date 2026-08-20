@@ -1020,6 +1020,14 @@ func advisorAssignCmd(primaryPane, reviewerPane string) error {
 	if reviewerPane == "none" {
 		return store.UnlinkReviewer(primaryPane)
 	}
+	// either pane may be an agent we have not had an event from yet
+	now := time.Now()
+	if err := hookd.TrackPane(store, primaryPane, now); err != nil {
+		return err
+	}
+	if err := hookd.TrackPane(store, reviewerPane, now); err != nil {
+		return err
+	}
 	return store.LinkReviewer(primaryPane, reviewerPane)
 }
 

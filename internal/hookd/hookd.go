@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -521,6 +522,45 @@ func isUserPrompt(prompt string) bool {
 	prompt = strings.TrimSpace(prompt)
 	return prompt != "" && !strings.HasPrefix(prompt, "<") &&
 		!strings.HasPrefix(prompt, ReqMarker) && !strings.HasPrefix(prompt, AdvMarker)
+}
+
+// agentPaneRe matches pane commands that are an agent's own TUI: Claude's
+// versioned binaries ("2.1.234"), or the agent names themselves.
+var agentPaneRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)+$`)
+
+// AgentKindInPane names the agent a pane command belongs to, or "" when
+// the pane is running something else.
+func AgentKindInPane(command string) string {
+	switch {
+	case agentPaneRe.MatchString(command), strings.HasPrefix(command, "claude"):
+		return "claude"
+	case strings.HasPrefix(command, "codex"):
+		return "codex"
+	}
+	return ""
+}
+
+// TrackPane starts tracking a pane because the user pointed at it — to
+// assign it as a reviewer, say. That is better evidence than any of our
+// heuristics, so it also clears a tombstone: the user can see what is in
+// the pane. What we cannot know yet (the session, its transcript) arrives
+// with the agent's next hook event.
+func TrackPane(store *state.Store, paneID string, now time.Time) error {
+	if _, err := store.Load(paneID); err == nil {
+		return nil // already tracked
+	}
+	info, ok := tmuxctl.PaneInfoFor(paneID)
+	if !ok {
+		return fmt.Errorf("%s is not a pane", paneID)
+	}
+	agent := AgentKindInPane(info.Command)
+	if agent == "" {
+		return fmt.Errorf("%s is not running an agent", paneID)
+	}
+	store.ClearEnded(paneID)
+	p := &state.Pane{PaneID: paneID, Agent: agent, Cwd: info.Path}
+	p.SetStatus(state.StatusWaitingInput, now)
+	return store.Save(p)
 }
 
 // paneRunsAgent reports whether an agent is actually running in a pane.
