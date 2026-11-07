@@ -10,6 +10,11 @@
 // delta feed, the activity timeline and the stuck detectors for free. The
 // file is ours, under $XDG_STATE_HOME/tmux-agent-hub/opencode/.
 //
+// This targets the opencode 2.x plugin API: the module's default export is
+// { id, setup }, and setup gets a context whose event.subscribe yields the
+// server's events as { type, location?, data }. The 1.x shape (a named
+// export returning hook functions) is rejected by 2.x at load time.
+//
 // BIN is replaced with the plugin's absolute path when it is installed.
 
 import { appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs"
@@ -59,6 +64,17 @@ const resultLine = (callID, output, isError) => ({
   },
 })
 
+// textOf flattens a tool's content parts ([{ type: "text", text }, ...])
+// into the plain string a tool_result carries.
+const textOf = (content) =>
+  (Array.isArray(content) ? content : [])
+    .filter((p) => p && p.type === "text" && p.text)
+    .map((p) => p.text)
+    .join("")
+
+const errorText = (error) =>
+  typeof error === "string" ? error : error?.message || (error ? JSON.stringify(error) : "")
+
 // notify runs the hook binary the way an agent's own hooks would: fire and
 // forget, never blocking the session, never surfacing an error into it.
 function notify(payload) {
@@ -89,126 +105,143 @@ function loaded(directory) {
   } catch {}
 }
 
-export const TmuxAgentHub = async ({ directory, worktree }) => {
-  const cwd = worktree || directory
-  loaded(cwd)
-  // what we have learned about each session, and which parts are already
-  // in its transcript — parts stream, so they arrive many times over
-  const sessions = new Map() // sessionID -> { model, cwd }
-  const written = new Set() // part id
-  const roles = new Map() // messageID -> "user" | "assistant"
+const TYPES = [
+  "session.created",
+  "session.deleted",
+  "session.inbox.enqueued",
+  "session.step.started",
+  "session.text.ended",
+  "session.tool.input.started",
+  "session.tool.called",
+  "session.tool.success",
+  "session.tool.failed",
+  "session.execution.succeeded",
+  "session.execution.failed",
+  "session.execution.interrupted",
+  "permission.asked",
+]
 
-  const session = (id) => {
-    if (!sessions.has(id)) sessions.set(id, {})
+async function setup(ctx) {
+  const home = ctx.location?.directory
+  loaded(home || "?")
+
+  // opencode 2.x runs one server for every directory and may set a plugin
+  // up once per directory. A session belongs to the instance whose
+  // directory its events carry; events without a location (the
+  // execution.* ones) are handled only for sessions already claimed.
+  const sessions = new Map() // sessionID -> { cwd, model, tools: Map(callID -> { name, input }) }
+
+  const claim = (event) => {
+    const id = event.data?.sessionID
+    if (!id) return undefined
+    const dir = event.location?.directory
+    if (!sessions.has(id)) {
+      if (!dir || (home && dir !== home)) return undefined
+      sessions.set(id, { cwd: dir, tools: new Map() })
+      // a session we meet mid-flight (the server outlived a plugin
+      // reload) is announced the way a fresh one is
+      if (event.type !== "session.created") report(id, "SessionStart")
+    }
     return sessions.get(id)
   }
 
-  const report = (sessionID, event, extra = {}) =>
+  const report = (sessionID, event, extra = {}) => {
+    const s = sessions.get(sessionID) || {}
     notify({
       hook_event_name: event,
       session_id: sessionID,
-      // the session's own directory, not the plugin's: a plugin loaded
-      // globally reports "/" for it, and a pane in the wrong directory is
-      // a pane the hub cannot match to this agent
-      cwd: session(sessionID).cwd || cwd,
+      cwd: s.cwd || home,
       transcript_path: transcriptFor(sessionID),
-      model: session(sessionID).model,
+      model: s.model,
       ...extra,
     })
-
-  return {
-    "chat.message": async (_input, output) => {
-      const sessionID = output.message.sessionID
-      roles.set(output.message.id, "user")
-      const text = (output.parts || [])
-        .filter((p) => p.type === "text" && p.text)
-        .map((p) => p.text)
-        .join("\n")
-      if (text) {
-        append(sessionID, userLine(text))
-        // the parts of a user message need no second look
-        for (const p of output.parts || []) written.add(p.id)
-      }
-      report(sessionID, "UserPromptSubmit", { prompt: text })
-    },
-
-    event: async ({ event }) => {
-      const props = event.properties || {}
-      switch (event.type) {
-        case "session.created":
-          if (props.info?.directory) session(props.info.id).cwd = props.info.directory
-          report(props.info?.id, "SessionStart")
-          break
-
-        case "session.updated":
-          if (props.info?.id && props.info.directory) {
-            session(props.info.id).cwd = props.info.directory
-          }
-          break
-
-        case "session.deleted":
-          report(props.info?.id, "SessionEnd")
-          break
-
-        case "session.idle":
-          report(props.sessionID, "Stop")
-          break
-
-        case "permission.updated":
-          report(props.sessionID, "PermissionRequest", {
-            tool_name: props.title || props.type || "",
-            message: "permission",
-          })
-          break
-
-        case "message.updated": {
-          const info = props.info
-          if (!info) break
-          roles.set(info.id, info.role)
-          if (info.role === "assistant") {
-            if (info.modelID) session(info.sessionID).model = info.modelID
-            if (info.path?.cwd) session(info.sessionID).cwd = info.path.cwd
-          }
-          break
-        }
-
-        case "message.part.updated": {
-          const part = props.part
-          if (!part || written.has(part.id)) break
-
-          if (part.type === "text") {
-            // a text part is final once it has an end time; before that it
-            // is still being typed and would land in the transcript twice
-            if (!part.time?.end || !part.text) break
-            written.add(part.id)
-            if (roles.get(part.messageID) === "user") {
-              append(part.sessionID, userLine(part.text))
-            } else {
-              append(part.sessionID, agentLine(part.text, session(part.sessionID).model))
-            }
-            break
-          }
-
-          if (part.type === "tool") {
-            const state = part.state || {}
-            if (state.status === "running" && !written.has(`pre:${part.callID}`)) {
-              written.add(`pre:${part.callID}`)
-              report(part.sessionID, "PreToolUse", { tool_name: part.tool })
-              break
-            }
-            if (state.status !== "completed" && state.status !== "error") break
-            written.add(part.id)
-            append(part.sessionID, toolLine(part.callID, part.tool, state.input))
-            append(
-              part.sessionID,
-              resultLine(part.callID, state.status === "error" ? state.error : state.output, state.status === "error"),
-            )
-            report(part.sessionID, "PostToolUse", { tool_name: part.tool })
-            break
-          }
-          break
-        }
-      }
-    },
   }
+
+  const handle = (event) => {
+    const data = event.data || {}
+    const s = claim(event)
+    if (!s) return
+    const id = data.sessionID
+
+    switch (event.type) {
+      case "session.created":
+        if (data.model?.id) s.model = data.model.id
+        report(id, "SessionStart")
+        break
+
+      case "session.deleted":
+        report(id, "SessionEnd")
+        sessions.delete(id)
+        break
+
+      case "session.inbox.enqueued": {
+        const item = data.item || {}
+        if (item.type !== "user") break
+        const text = item.payload?.text || ""
+        if (text) append(id, userLine(text))
+        report(id, "UserPromptSubmit", { prompt: text })
+        break
+      }
+
+      case "session.step.started":
+        if (data.model?.id) s.model = data.model.id
+        break
+
+      case "session.text.ended":
+        if (data.text) append(id, agentLine(data.text, s.model))
+        break
+
+      case "session.tool.input.started":
+        s.tools.set(data.id, { name: data.name })
+        break
+
+      case "session.tool.called": {
+        const tool = s.tools.get(data.id) || { name: "" }
+        tool.input = data.input
+        s.tools.set(data.id, tool)
+        report(id, "PreToolUse", { tool_name: tool.name })
+        break
+      }
+
+      case "session.tool.success":
+      case "session.tool.failed": {
+        const tool = s.tools.get(data.id) || { name: "" }
+        s.tools.delete(data.id)
+        const failed = event.type === "session.tool.failed"
+        const output = failed ? errorText(data.error) || textOf(data.content) : textOf(data.content)
+        append(id, toolLine(data.id, tool.name, tool.input))
+        append(id, resultLine(data.id, output, failed))
+        report(id, "PostToolUse", { tool_name: tool.name })
+        break
+      }
+
+      case "session.execution.succeeded":
+      case "session.execution.failed":
+      case "session.execution.interrupted":
+        report(id, "Stop")
+        break
+
+      case "permission.asked":
+        report(id, "PermissionRequest", {
+          tool_name: data.action || "",
+          message: data.message || "permission",
+        })
+        break
+    }
+  }
+
+  const abort = new AbortController()
+  ;(async () => {
+    for await (const event of ctx.event.subscribe({ types: TYPES, signal: abort.signal })) {
+      try {
+        handle(event)
+      } catch {
+        // one odd event must not end the subscription
+      }
+    }
+  })().catch(() => {})
+
+  return () => abort.abort()
 }
+
+export default { id: "tmux-agent-hub", setup }
